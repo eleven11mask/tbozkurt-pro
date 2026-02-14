@@ -9,41 +9,52 @@ import string
 import hashlib
 from datetime import datetime
 
-# --- 1. YAPILANDIRMA VE TAM MÜFREDAT ---
+# --- 1. YAPILANDIRMA VE TAM YKS MÜFREDATI ---
 st.set_page_config(page_title="T-BOZKURT v3.5", layout="wide", page_icon="🐺")
 
-# Müfredat (9-12 Tüm Temel Dersler ve Konular)
 MUFREDAT = {
     "9. Sınıf": {
-        "Matematik": ["Mantık", "Kümeler", "Üçgenler", "Veri"],
-        "Türk Dili ve Edebiyatı": ["Hikaye", "Şiir", "Roman"],
-        "Fizik": ["Hareket", "Enerji", "Isı ve Sıcaklık"],
-        "Kimya": ["Atom ve Periyodik Sistem", "Kimya Bilimi"]
+        "Matematik": ["Mantık", "Kümeler", "Denklemler ve Eşitsizlikler", "Üçgenler", "Veri"],
+        "Türk Dili ve Edebiyatı": ["Giriş", "Hikaye", "Şiir", "Masal/Fabl", "Roman", "Tiyatro"],
+        "Fizik": ["Fizik Bilimine Giriş", "Madde ve Özellikleri", "Hareket ve Kuvvet", "Enerji", "Isı ve Sıcaklık"],
+        "Kimya": ["Kimya Bilimi", "Atom ve Periyodik Sistem", "Etkileşimler", "Maddenin Halleri"],
+        "Biyoloji": ["Yaşam Bilimi", "Hücre", "Canlılar Dünyası"],
+        "Tarih": ["Tarih ve Zaman", "İlk Dönemler", "Orta Çağ", "İslam Medeniyeti"],
+        "Coğrafya": ["Doğa ve İnsan", "Dünya’nın Şekli", "Harita Bilgisi", "İklim"]
     },
     "10. Sınıf": {
-        "Matematik": ["Fonksiyonlar", "Polinomlar", "Dörtgenler"],
-        "Biyoloji": ["Hücre Bölünmeleri", "Kalıtım"],
-        "Tarih": ["Osmanlı Kuruluş", "Selçuklu Dönemi"],
-        "Coğrafya": ["İç Kuvvetler", "Dış Kuvvetler"]
+        "Matematik": ["Olasılık", "Fonksiyonlar", "Polinomlar", "Denklemler", "Çokgenler"],
+        "Türk Dili ve Edebiyatı": ["Halk Hikayesi", "Mesnevi", "Destan", "Divan Edebiyatı", "Tanzimat"],
+        "Fizik": ["Elektrik", "Basınç", "Dalgalar", "Optik"],
+        "Kimya": ["Karışımlar", "Asit-Baz-Tuz", "Kimya Her Yerde"],
+        "Biyoloji": ["Hücre Bölünmeleri", "Kalıtım", "Ekoloji"],
+        "Tarih": ["Selçuklu Türkiyesi", "Osmanlı Kuruluş", "Osmanlı Yükselme"],
+        "Coğrafya": ["İç Kuvvetler", "Dış Kuvvetler", "Türkiye Yer Şekilleri"]
     },
     "11. Sınıf": {
-        "Matematik (AYT)": ["Trigonometri", "Analitik Geometri", "Limit"],
-        "Fizik (AYT)": ["Vektörler", "Newton Yasaları", "Atışlar"],
-        "Kimya (AYT)": ["Modern Atom Teorisi", "Gazlar", "Sıvı Çözeltiler"]
+        "Matematik (AYT)": ["Trigonometri", "Analitik Geometri", "Denklem Sistemleri", "Çember"],
+        "Fizik (AYT)": ["Vektörler", "Bağıl Hareket", "Newton Yasaları", "Atışlar", "Enerji", "Momentum"],
+        "Kimya (AYT)": ["Atom Teorisi", "Gazlar", "Sıvı Çözeltiler", "Hız", "Denge"],
+        "Biyoloji (AYT)": ["Denetleyici Sistem", "Destek ve Hareket", "Sindirim", "Dolaşım"],
+        "Tarih": ["Değişim Çağında Avrupa", "Uluslararası İlişkiler"],
+        "Coğrafya": ["Biyoçeşitlilik", "Beşeri Sistemler", "Küresel Ortam"]
     },
     "12. Sınıf": {
-        "Matematik (AYT)": ["Türev", "İntegral", "Logaritma"],
-        "Edebiyat (AYT)": ["Cumhuriyet Dönemi", "Batı Etkisi"],
-        "Biyoloji (AYT)": ["Genden Proteine", "Bitki Biyolojisi"]
+        "Matematik (AYT)": ["Logaritma", "Diziler", "Trigonometri 2", "Türev", "İntegral"],
+        "Türk Dili ve Edebiyatı": ["Cumhuriyet Romanı", "Deneme", "Nutuk", "Mülakat"],
+        "Fizik (AYT)": ["Çembersel Hareket", "Harmonik Hareket", "Dalga Mekaniği", "Modern Fizik"],
+        "Kimya (AYT)": ["Elektrokimya", "Karbon Kimyası", "Organik Bileşikler"],
+        "Biyoloji (AYT)": ["Genden Proteine", "Enerji Dönüşümleri", "Bitki Biyolojisi"]
     }
 }
 
 try:
     genai.configure(api_key=st.secrets["GEMINI_KEY"])
+    # 404 hatasını önlemek için güncel model adı
     MODEL = genai.GenerativeModel('gemini-1.5-flash-latest')
     ADMIN_SIFRE = st.secrets["ADMIN_KEY"]
 except:
-    st.error("⚠️ Secrets yapılandırması eksik!")
+    st.error("⚠️ Ayarlar (Secrets) yapılandırılamadı!")
 
 # --- 2. VERİTABANI MOTORU ---
 def vt_sorgu(sorgu, parametre=(), commit=False):
@@ -53,8 +64,9 @@ def vt_sorgu(sorgu, parametre=(), commit=False):
         c.execute(sorgu, parametre)
         if commit: conn.commit()
         sonuc = c.fetchall()
-        return sonuc, (c.rowcount if c.rowcount != -1 else len(sonuc))
-    except:
+        rowcount = c.rowcount if c.rowcount != -1 else len(sonuc)
+        return sonuc, rowcount
+    except Exception:
         if commit: conn.rollback()
         return [], 0
     finally:
@@ -70,163 +82,182 @@ def vt_baslat():
 
 vt_baslat()
 
-# --- 3. YARDIMCI ARAÇLAR ---
+# --- 3. GÜVENLİK VE LİSANS ---
 def hash_pass(p): return hashlib.sha256(p.encode()).hexdigest()
-def deneme_bilgisi(u):
-    res, _ = vt_sorgu("SELECT kayit_tarihi, premium, xp FROM users WHERE username=?", (u,))
+
+def lisans_uret_pro():
+    # 15 karakterli, karışık ve güvenli ID üretimi
+    karakterler = string.ascii_uppercase + string.digits + string.ascii_lowercase
+    return ''.join(secrets.choice(karakterler) for _ in range(15))
+
+def deneme_bilgisi(username):
+    res, _ = vt_sorgu("SELECT kayit_tarihi, premium, xp FROM users WHERE username=?", (username,))
     if not res: return 0, 0, 0
-    dt = datetime.strptime(res[0][0], "%Y-%m-%d %H:%M")
-    kalan = 7 - (datetime.now() - dt).total_seconds() / 86400
+    kayit_dt = datetime.strptime(res[0][0], "%Y-%m-%d %H:%M")
+    kalan = 7 - (datetime.now() - kayit_dt).total_seconds() / 86400
     return max(0, int(kalan)), res[0][1], res[0][2]
 
-# --- 4. OTURUM VE PANEL ---
+# --- 4. GİRİŞ VE KAYIT (ORİJİNAL YAPI) ---
 if "user" not in st.session_state:
-    st.title("🐺 T-BOZKURT")
-    tab1, tab2 = st.tabs(["Giriş", "Kayıt"])
-    with tab1:
-        with st.form("g"):
-            ui, pi = st.text_input("Kullanıcı Adı"), st.text_input("Şifre", type="password")
-            if st.form_submit_button("Giriş"):
-                d, _ = vt_sorgu("SELECT password FROM users WHERE username=?", (ui,))
-                if d and d[0][0] == hash_pass(pi): st.session_state.user = ui; st.rerun()
-                else: st.error("Hatalı!")
-    with tab2:
-        with st.form("k"):
-            u, p, s = st.text_input("Kullanıcı Adı"), st.text_input("Şifre", type="password"), st.selectbox("Sınıf", list(MUFREDAT.keys()))
-            if st.form_submit_button("Katıl"):
+    st.title("🐺 T-BOZKURT: Akademik Karargah")
+    t1, t2 = st.tabs(["Giriş", "7 Günlük Deneme"])
+    with t2:
+        with st.form("kayit_formu"):
+            u = st.text_input("Kullanıcı Adı")
+            p = st.text_input("Şifre", type="password")
+            s = st.selectbox("Sınıfınız", list(MUFREDAT.keys()))
+            if st.form_submit_button("Başlat"):
                 res, _ = vt_sorgu("SELECT * FROM users WHERE username=?", (u,))
-                if res: st.error("Alınmış.")
+                if res: st.error("Bu kullanıcı adı alınmış.")
                 else:
-                    vt_sorgu("INSERT INTO users (username, password, sinif, kayit_tarihi) VALUES (?,?,?,?)", (u, hash_pass(p), s, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
-                    st.success("Başarılı!"); st.balloons()
+                    vt_sorgu("INSERT INTO users (username, password, sinif, kayit_tarihi) VALUES (?,?,?,?)",
+                             (u, hash_pass(p), s, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
+                    st.success("Kaydınız başarıyla oluşturuldu!"); st.balloons()
+    with t1:
+        with st.form("giris_formu"):
+            u_i = st.text_input("Kullanıcı Adı")
+            p_i = st.text_input("Şifre", type="password")
+            if st.form_submit_button("Giriş Yap"):
+                d, _ = vt_sorgu("SELECT password FROM users WHERE username=?", (u_i,))
+                if d and d[0][0] == hash_pass(p_i): st.session_state.user = u_i; st.rerun()
+                else: st.error("Hatalı kullanıcı adı veya şifre!")
     st.stop()
 
+# --- 5. PANEL VE YAN MENÜ ---
 u_name = st.session_state.user
 k_gun, is_pre, u_xp = deneme_bilgisi(u_name)
 
 with st.sidebar:
     st.title(f"🐺 {u_name}")
-    st.metric("🔥 Toplam XP", u_xp)
+    st.metric("🔥 XP Skorun", u_xp)
     if not is_pre:
-        st.warning(f"⏳ Deneme: {k_gun} Gün")
-        lkod = st.text_input("Lisans Kodu")
-        if st.button("Aktif Et"):
-            res, _ = vt_sorgu("SELECT * FROM licenses WHERE kod=? AND kullanildi=0", (lkod,))
+        st.warning(f"⏳ {k_gun} Gün Kalan Süre")
+        l_kod = st.text_input("Lisans Kodunu Girin")
+        if st.button("Sistemi Aktifleştir"):
+            res, _ = vt_sorgu("SELECT * FROM licenses WHERE kod=? AND kullanildi=0", (l_kod,))
             if res:
                 vt_sorgu("UPDATE users SET premium=1 WHERE username=?", (u_name,), commit=True)
-                vt_sorgu("UPDATE licenses SET kullanildi=1 WHERE kod=?", (lkod,), commit=True)
-                st.success("Premium!"); st.rerun()
-    else: st.success("💎 PREMIUM")
-    if st.button("Çıkış"): del st.session_state.user; st.rerun()
-    is_admin = (st.text_input("Admin", type="password") == ADMIN_SIFRE)
+                vt_sorgu("UPDATE licenses SET kullanildi=1 WHERE kod=?", (l_kod,), commit=True)
+                st.success("Premium Üyelik Aktif Edildi!"); st.rerun()
+    else: st.success("💎 PREMIUM ÜYE")
+    if st.button("Güvenli Çıkış"): del st.session_state.user; st.rerun()
+    st.divider()
+    is_admin = (st.text_input("Yönetici Kilidi", type="password") == ADMIN_SIFRE)
 
-if k_gun <= 0 and not is_pre: st.error("Süre bitti!"); st.stop()
+if k_gun <= 0 and not is_pre: st.error("Deneme süreniz doldu!"); st.stop()
 
-# --- 5. MODÜLLER ---
-tabs = st.tabs(["📚 Ders Çalış", "📊 Analiz", "🛠️ Admin"] if is_admin else ["📚 Ders Çalış", "📊 Analiz"])
+# --- 6. ANA DERS MODÜLÜ ---
+tabs = st.tabs(["📚 Ders Çalış", "📊 İlerleme Analizi", "🛠️ Yönetim"] if is_admin else ["📚 Ders Çalış", "📊 İlerleme Analizi"])
 
 with tabs[0]:
-    rs, _ = vt_sorgu("SELECT sinif FROM users WHERE username=?", (u_name,))
-    if rs:
-        s_bilgi = rs[0][0]
-        dl, _ = vt_sorgu("SELECT DISTINCT ders FROM konular WHERE sinif=?", (s_bilgi,))
-        if dl:
-            s_ders = st.selectbox("Ders", [d[0] for d in dl])
-            kl, _ = vt_sorgu("SELECT id, konu_adi FROM konular WHERE ders=? AND sinif=?", (s_ders, s_bilgi))
-            if kl:
-                sk_ad = st.selectbox("Konu", [k[1] for k in kl])
-                kid = [k[0] for k in kl if k[1] == sk_ad][0]
+    r_s, _ = vt_sorgu("SELECT sinif FROM users WHERE username=?", (u_name,))
+    if r_s:
+        s_bilgi = r_s[0][0]
+        d_list, _ = vt_sorgu("SELECT DISTINCT ders FROM konular WHERE sinif=?", (s_bilgi,))
+        if d_list:
+            s_ders = st.selectbox("Çalışmak İstediğiniz Ders", [d[0] for d in d_list])
+            k_list, _ = vt_sorgu("SELECT id, konu_adi FROM konular WHERE ders=? AND sinif=?", (s_ders, s_bilgi))
+            if k_list:
+                s_konu_ad = st.selectbox("Konu Seçin", [k[1] for k in k_list])
+                kid = [k[0] for k in k_list if k[1] == s_konu_ad][0]
                 
-                c1, c2 = st.tabs(["📖 Konu Anlatımı", "📝 Test Çöz"])
+                c1, c2 = st.tabs(["📖 Konu Anlatımı", "📝 Pratik Testi"])
                 with c1:
                     detay, _ = vt_sorgu("SELECT icerik FROM konular WHERE id=?", (kid,))
                     st.markdown(detay[0][0])
                 with c2:
                     sorular, _ = vt_sorgu("SELECT * FROM sorular WHERE konu_id=? ORDER BY RANDOM() LIMIT 15", (kid,))
                     if sorular:
-                        with st.form(f"t_{kid}"):
+                        with st.form(f"test_form_{kid}"):
                             cevaplar = {}
                             for i, s in enumerate(sorular):
                                 st.info(f"**Soru {i+1}:** {s[2]}")
-                                cevaplar[i] = st.radio(f"Seçenekler {i}", [f"A) {s[3]}", f"B) {s[4]}", f"C) {s[5]}", f"D) {s[6]}"], key=f"s_{s[0]}")
-                            if st.form_submit_button("Testi Tamamla"):
-                                ds = sum(1 for i, s in enumerate(sorular) if cevaplar[i].startswith(s[7].upper()))
-                                n = ds - ((len(sorular)-ds)*0.25)
-                                vt_sorgu("UPDATE users SET xp = xp + ? WHERE username=?", (ds*20, u_name), commit=True)
-                                vt_sorgu("INSERT INTO test_sonuclari (username, ders, dogru, yanlis, net, tarih) VALUES (?,?,?,?,?,?)", (u_name, s_ders, ds, len(sorular)-ds, n, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
-                                
-                                # Görsel Kart Görünümü
-                                st.success(f"🎯 Test Tamamlandı! Net: {n}")
+                                cevaplar[i] = st.radio(f"Şıklar {i}", ["a","b","c","d"], horizontal=True, key=f"soru_{s[0]}")
+                            if st.form_submit_button("Testi Bitir"):
+                                d_s = sum(1 for i, s in enumerate(sorular) if cevaplar[i] == s[7])
+                                n = d_s - ((len(sorular)-d_s)*0.25)
+                                vt_sorgu("UPDATE users SET xp = xp + ? WHERE username=?", (d_s*20, u_name), commit=True)
+                                vt_sorgu("INSERT INTO test_sonuclari (username, ders, dogru, yanlis, net, tarih) VALUES (?,?,?,?,?,?)",
+                                         (u_name, s_ders, d_s, len(sorular)-d_s, n, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
+                                st.success(f"Tebrikler! Toplam Netin: {n}")
                                 for i, s in enumerate(sorular):
-                                    with st.expander(f"Soru {i+1} Analizi"):
-                                        st.write(f"Senin Cevabın: {cevaplar[i]}")
-                                        st.write(f"Doğru Cevap: **{s[7].upper()}**")
-                                        st.markdown(f"**💡 Çözüm:** {s[8]}")
+                                    with st.expander(f"Soru {i+1} Çözümü ve Doğru Cevap"):
+                                        st.write(f"Doğru Seçenek: **{s[7].upper()}**")
+                                        st.markdown(f"**Çözüm Yolu:** {s[8]}")
                                 st.balloons()
-                    else: st.info("Soru yok.")
+                    else: st.info("Bu konu için henüz soru üretilmemiş.")
 
 with tabs[1]:
     v, _ = vt_sorgu("SELECT ders, net, tarih FROM test_sonuclari WHERE username=?", (u_name,))
     if v:
         df = pd.DataFrame(v, columns=["Ders", "Net", "Tarih"])
         st.line_chart(df.set_index("Tarih")["Net"])
-        st.dataframe(df.tail(10), use_container_width=True)
+        st.dataframe(df, use_container_width=True)
 
-# --- 6. ADMIN (HIZLANDIRILMIŞ DİNAMİK BATCH) ---
+# --- 7. YÖNETİCİ PANELİ (SORU ÜRETİM FABRİKASI) ---
 if is_admin:
     with tabs[-1]:
-        st.subheader("🛡️ Yönetim Merkezi")
-        if st.button("📌 Müfredatı Güncelle (9-12)"):
-            c = 0
+        st.subheader("🏛️ Müfredat Kontrol Merkezi")
+        if st.button("📌 Tüm Müfredatı Sisteme Enjekte Et"):
+            sayac = 0
             for snf, drsler in MUFREDAT.items():
                 for drs, knlar in drsler.items():
                     for kn in knlar:
-                        ex, _ = vt_sorgu("SELECT id FROM konular WHERE ders=? AND sinif=? AND konu_adi=?", (drs, snf, kn))
-                        if not ex:
-                            vt_sorgu("INSERT INTO konular (ders, sinif, konu_adi, icerik) VALUES (?,?,?,?)", (drs, snf, kn, f"{kn} hakkında akademik notlar..."), commit=True)
-                            c += 1
-            st.success(f"{c} Konu eklendi.")
+                        var_mi, _ = vt_sorgu("SELECT id FROM konular WHERE ders=? AND sinif=? AND konu_adi=?", (drs, snf, kn))
+                        if not var_mi:
+                            vt_sorgu("INSERT INTO konular (ders, sinif, konu_adi, icerik) VALUES (?,?,?,?)",
+                                     (drs, snf, kn, f"{kn} konusu akademik özetleri hazırlanıyor..."), commit=True)
+                            sayac += 1
+            st.success(f"{sayac} adet yeni konu müfredata eklendi!")
 
         st.divider()
-        st.subheader("🤖 Dinamik Soru Fabrikası")
-        fs = st.selectbox("Sınıf", list(MUFREDAT.keys()))
-        dl_a, _ = vt_sorgu("SELECT DISTINCT ders FROM konular WHERE sinif=?", (fs,))
-        fd = st.selectbox("Ders", [d[0] for d in dl_a] if dl_a else ["Boş"])
-        kl_a, _ = vt_sorgu("SELECT id, konu_adi FROM konular WHERE ders=? AND sinif=?", (fd, fs))
-        fk_ad = st.selectbox("Konu", [k[1] for k in kl_a] if kl_a else ["Boş"])
+        st.subheader("🤖 Akıllı Soru Üretim Motoru")
+        f_s = st.selectbox("Sınıf Seçin", list(MUFREDAT.keys()))
+        d_l, _ = vt_sorgu("SELECT DISTINCT ders FROM konular WHERE sinif=?", (f_s,))
+        f_d = st.selectbox("Ders Seçin", [d[0] for d in d_l] if d_l else ["Ders Yok"])
+        k_l, _ = vt_sorgu("SELECT id, konu_adi FROM konular WHERE ders=? AND sinif=?", (f_d, f_s))
+        f_k_ad = st.selectbox("Konu Seçin", [k[1] for k in k_l] if k_l else ["Konu Yok"])
         
-        # Dinamik Batch Ayarı
-        batch_hizi = st.select_slider("Üretim Hızı (Batch)", options=[3, 5, 8, 10], value=5)
-        fn = st.number_input("Hedef Soru Sayısı", 5, 200, 20)
+        batch_hizi = st.select_slider("Üretim Parti Hızı (Batch)", options=[3, 5, 8, 10], value=5)
+        f_n = st.number_input("Hedeflenen Soru Sayısı", 5, 100, 20)
         
-        if st.button("🚀 Akıllı Üretimi Başlat"):
-            f_kid = [k[0] for k in kl_a if k[1] == fk_ad][0]
-            toplam, deneme, max_d = 0, 0, fn*3
-            pb = st.progress(0.0)
-            status = st.empty()
+        if st.button("🚀 Üretimi Başlat"):
+            f_kid = [k[0] for k in k_l if k[1] == f_k_ad][0]
+            toplam, deneme, max_deneme = 0, 0, f_n*2
+            ilerleme_cubugu = st.progress(0.0)
+            durum = st.empty()
             
-            while toplam < fn and deneme < max_d:
+            while toplam < f_n and deneme < max_deneme:
                 deneme += 1
-                kalan = min(batch_hizi, fn - toplam)
-                status.info(f"⏳ İlerleme: {toplam}/{fn} | AI Sınıf: {fs}")
+                kalan = min(batch_hizi, f_n - toplam)
+                durum.info(f"⏳ İşleniyor: {toplam}/{f_n} | AI Karargaha bağlanıyor...")
                 
-                prompt = f"""
-                GÖREV: {fs} {fd} - {fk_ad} konusu için {kalan} adet YKS tarzı soru üret.
-                JSON FORMAT: [{{'soru': '..', 'a': '..', 'b': '..', 'c': '..', 'd': '..', 'cevap': 'a', 'cozum': '..'}}]
-                KURAL: Soru metninde çift tırnak (") kullanma.
+                istek = f"""
+                GÖREV: {f_s} {f_d} - {f_k_ad} konusu için {kalan} adet sınav tarzı soru üret.
+                KURAL 1: Sadece JSON listesi döndür.
+                KURAL 2: Metin içinde asla çift tırnak (") kullanma, tek tırnak (') kullan.
+                YAPI: [{{'soru': '...', 'a': '...', 'b': '...', 'c': '...', 'd': '...', 'cevap': 'a/b/c/d', 'cozum': '...'}}]
                 """
                 try:
-                    res = MODEL.generate_content(prompt)
-                    raw = res.text.strip()
-                    if "```" in raw: raw = raw.split("```")[1].replace("json", "")
+                    cevap = MODEL.generate_content(istek)
+                    ham_metin = cevap.text.strip()
+                    # Markdown temizleme
+                    if "```" in ham_metin:
+                        ham_metin = ham_metin.split("```")[1].replace("json", "").strip()
                     
-                    s_list = json.loads(raw)
-                    for s in s_list:
-                        _, row = vt_sorgu("INSERT OR IGNORE INTO sorular (konu_id, soru_metni, a, b, c, d, cevap, cozum) VALUES (?,?,?,?,?,?,?,?)", 
-                                         (f_kid, s["soru"], s["a"], s["b"], s["c"], s["d"], s["cevap"].lower(), s["cozum"]), commit=True)
-                        if row > 0: toplam += 1
-                    pb.progress(min(toplam/fn, 1.0))
-                    time.sleep(1.5) # API Güvenlik Beklemesi
-                except:
-                    time.sleep(2)
-            status.success(f"✅ İşlem bitti! {toplam} yeni soru mühürlendi.")
+                    soru_listesi = json.loads(ham_metin)
+                    for s in soru_listesi:
+                        if all(anahtar in s for anahtar in ("soru", "a", "b", "c", "d", "cevap", "cozum")):
+                            _, satir = vt_sorgu("""
+                                INSERT OR IGNORE INTO sorular (konu_id, soru_metni, a, b, c, d, cevap, cozum) 
+                                VALUES (?,?,?,?,?,?,?,?)
+                            """, (f_kid, s["soru"], s["a"], s["b"], s["c"], s["d"], s["cevap"].lower(), s["cozum"]), commit=True)
+                            if satir > 0: toplam += 1
+                    ilerleme_cubugu.progress(min(toplam/f_n, 1.0))
+                    time.sleep(2) # Kota aşımı önleyici
+                except Exception:
+                    time.sleep(3)
+                    continue
+            
+            durum.success(f"✅ Üretim Tamamlandı! {toplam} soru sisteme mühürlendi.")
+            st.balloons()
