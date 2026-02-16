@@ -5,13 +5,11 @@
       "Kümeler",
       "Denklemler",
       "Eşitsizlikler",
-      "Fonksiyon Kavramı",
-      "Bölünebilme",
-      "EBOB-EKOK",
       "Üslü Sayılar",
       "Köklü Sayılar",
       "Oran-Orantı",
-      "Problemler"
+      "Problemler",
+      "Fonksiyon Kavramı"
     ],
     "Fizik": [
       "Fizik Bilimine Giriş",
@@ -22,13 +20,12 @@
       "Isı ve Sıcaklık"
     ],
     "Kimya": [
-      "Kimya Bilimi",
       "Atom ve Periyodik Sistem",
-      "Kimyasal Türler Arası Etkileşim",
-      "Maddenin Halleri"
+      "Kimyasal Türler",
+      "Maddenin Halleri",
+      "Karışımlar"
     ],
     "Biyoloji": [
-      "Yaşam Bilimi",
       "Hücre",
       "Canlıların Çeşitliliği",
       "Ekosistem"
@@ -50,7 +47,7 @@
       "Permütasyon",
       "Kombinasyon",
       "Olasılık",
-      "Geometri Temelleri"
+      "Geometri"
     ],
     "Fizik": [
       "Elektrik",
@@ -61,7 +58,7 @@
     "Kimya": [
       "Asitler ve Bazlar",
       "Kimyasal Tepkimeler",
-      "Karışımlar"
+      "Çözeltiler"
     ],
     "Biyoloji": [
       "Kalıtım",
@@ -81,8 +78,8 @@
       "Analitik Geometri",
       "Limit",
       "Türev",
-      "Karmaşık Sayılar",
-      "Logaritma"
+      "Logaritma",
+      "Karmaşık Sayılar"
     ],
     "Fizik": [
       "Kuvvet ve Hareket",
@@ -96,10 +93,10 @@
       "Elektrokimya"
     ],
     "Biyoloji": [
-      "Sistemler",
       "Sinir Sistemi",
       "Dolaşım Sistemi",
-      "Solunum Sistemi"
+      "Solunum Sistemi",
+      "Destek ve Hareket Sistemi"
     ],
     "Edebiyat": [
       "Tanzimat Dönemi",
@@ -116,7 +113,7 @@
       "Çember Analitiği",
       "Diziler",
       "Trigonometri 2",
-      "Logaritma İleri Seviye"
+      "Logaritma İleri"
     ],
     "Fizik": [
       "Çembersel Hareket",
@@ -153,3 +150,4 @@
     ]
   }
 }
+
