@@ -1,0 +1,155 @@
+{
+  "9. Sınıf": {
+    "Matematik": [
+      "Mantık",
+      "Kümeler",
+      "Denklemler",
+      "Eşitsizlikler",
+      "Fonksiyon Kavramı",
+      "Bölünebilme",
+      "EBOB-EKOK",
+      "Üslü Sayılar",
+      "Köklü Sayılar",
+      "Oran-Orantı",
+      "Problemler"
+    ],
+    "Fizik": [
+      "Fizik Bilimine Giriş",
+      "Madde ve Özellikleri",
+      "Hareket",
+      "Kuvvet",
+      "Enerji",
+      "Isı ve Sıcaklık"
+    ],
+    "Kimya": [
+      "Kimya Bilimi",
+      "Atom ve Periyodik Sistem",
+      "Kimyasal Türler Arası Etkileşim",
+      "Maddenin Halleri"
+    ],
+    "Biyoloji": [
+      "Yaşam Bilimi",
+      "Hücre",
+      "Canlıların Çeşitliliği",
+      "Ekosistem"
+    ],
+    "Türkçe": [
+      "Sözcükte Anlam",
+      "Cümlede Anlam",
+      "Paragraf",
+      "Yazım Kuralları",
+      "Noktalama"
+    ]
+  },
+
+  "10. Sınıf": {
+    "Matematik": [
+      "Fonksiyonlar",
+      "Polinomlar",
+      "İkinci Dereceden Denklemler",
+      "Permütasyon",
+      "Kombinasyon",
+      "Olasılık",
+      "Geometri Temelleri"
+    ],
+    "Fizik": [
+      "Elektrik",
+      "Manyetizma",
+      "Optik",
+      "Dalgalar"
+    ],
+    "Kimya": [
+      "Asitler ve Bazlar",
+      "Kimyasal Tepkimeler",
+      "Karışımlar"
+    ],
+    "Biyoloji": [
+      "Kalıtım",
+      "Bitki Biyolojisi",
+      "Hayvan Biyolojisi"
+    ],
+    "Tarih": [
+      "Osmanlı Kuruluş",
+      "Yükselme Dönemi",
+      "Avrupa Tarihi"
+    ]
+  },
+
+  "11. Sınıf": {
+    "Matematik": [
+      "Trigonometri",
+      "Analitik Geometri",
+      "Limit",
+      "Türev",
+      "Karmaşık Sayılar",
+      "Logaritma"
+    ],
+    "Fizik": [
+      "Kuvvet ve Hareket",
+      "Elektriksel Alan",
+      "Manyetik Alan",
+      "Modern Fizik"
+    ],
+    "Kimya": [
+      "Kimyasal Denge",
+      "Çözünürlük",
+      "Elektrokimya"
+    ],
+    "Biyoloji": [
+      "Sistemler",
+      "Sinir Sistemi",
+      "Dolaşım Sistemi",
+      "Solunum Sistemi"
+    ],
+    "Edebiyat": [
+      "Tanzimat Dönemi",
+      "Servet-i Fünun",
+      "Milli Edebiyat"
+    ]
+  },
+
+  "12. Sınıf": {
+    "Matematik": [
+      "Limit",
+      "Türev",
+      "İntegral",
+      "Çember Analitiği",
+      "Diziler",
+      "Trigonometri 2",
+      "Logaritma İleri Seviye"
+    ],
+    "Fizik": [
+      "Çembersel Hareket",
+      "Basit Harmonik Hareket",
+      "Atom Fiziği",
+      "Nükleer Fizik"
+    ],
+    "Kimya": [
+      "Organik Kimya",
+      "Polimerler",
+      "Enerji Kaynakları"
+    ],
+    "Biyoloji": [
+      "DNA ve RNA",
+      "Protein Sentezi",
+      "Evrim",
+      "Ekoloji"
+    ],
+    "Edebiyat": [
+      "Cumhuriyet Dönemi",
+      "Modern Türk Şiiri",
+      "Roman",
+      "Tiyatro"
+    ],
+    "Tarih": [
+      "İnkılap Tarihi",
+      "Soğuk Savaş",
+      "Çağdaş Dünya"
+    ],
+    "Coğrafya": [
+      "Türkiye Ekonomisi",
+      "Jeopolitik Konum",
+      "Küresel Ticaret"
+    ]
+  }
+}
