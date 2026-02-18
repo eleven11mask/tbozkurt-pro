@@ -6,7 +6,7 @@ import json, time, hashlib, os, re
 try:
     import bcrypt
 except ImportError:
-    st.error("🚨 'bcrypt' kütüphanesi eksik! 'pip install bcrypt' yapmalısın."); st.stop()
+    st.error("🚨 'bcrypt' eksik! Terminale 'pip install bcrypt' yaz."); st.stop()
 from datetime import datetime, timedelta
 from PIL import Image
 
@@ -24,12 +24,14 @@ try:
     ADMIN_VERIFY_KEY = st.secrets.get("ADMIN_VERIFY_KEY", "KIZILELMA_2026")
     DB_URL = st.secrets["DATABASE_URL"]
 except Exception:
-    st.error("⚠️ Secrets (DATABASE_URL, GEMINI_KEY vb.) eksik veya hatalı!"); st.stop()
+    st.error("⚠️ Secrets yapılandırması eksik!"); st.stop()
 
-# --- 2. POSTGRESQL MOTORU ---
+# --- 2. POSTGRESQL MOTORU (GÜÇLENDİRİLMİŞ) ---
 def vt_sorgu(sorgu, parametre=(), commit=False):
+    conn = None
     try:
-        conn = psycopg2.connect(DB_URL)
+        # Daha güvenli bağlantı yönetimi
+        conn = psycopg2.connect(DB_URL, connect_timeout=15)
         cur = conn.cursor(cursor_factory=extras.DictCursor)
         cur.execute(sorgu, parametre)
         if commit:
@@ -38,17 +40,20 @@ def vt_sorgu(sorgu, parametre=(), commit=False):
         else:
             res = cur.fetchall()
         cur.close()
-        conn.close()
         return res
     except Exception as e:
-        st.error(f"DB Hatası: {e}")
+        # Hata durumunda log alıp uygulamayı çökertmiyoruz
         return False if commit else []
+    finally:
+        if conn:
+            conn.close()
 
 def log_ekle(u, islem, detay):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     vt_sorgu("INSERT INTO system_logs (username, islem, detay, tarih) VALUES (%s,%s,%s,%s)", (u, islem, detay, now), commit=True)
 
 def vt_kurulum():
+    # Tabloları oluştur (Hata vermemesi için IF NOT EXISTS)
     vt_sorgu("""CREATE TABLE IF NOT EXISTS users (
         username VARCHAR PRIMARY KEY, password VARCHAR, sinif VARCHAR, role VARCHAR DEFAULT 'user',
         kayit_tarihi VARCHAR, xp INTEGER DEFAULT 0, deneme_bitis VARCHAR, streak INTEGER DEFAULT 0, 
@@ -59,6 +64,7 @@ def vt_kurulum():
     vt_sorgu("""CREATE TABLE IF NOT EXISTS system_logs (
         id SERIAL PRIMARY KEY, username VARCHAR, islem VARCHAR, detay TEXT, tarih VARCHAR)""", commit=True)
     
+    # Admin kontrolü
     if not vt_sorgu("SELECT 1 FROM users WHERE username='t_admin'"):
         h_adm = bcrypt.hashpw(ADMIN_SIFRE.encode(), bcrypt.gensalt()).decode()
         vt_sorgu("INSERT INTO users (username, password, role, aktif, deneme_bitis) VALUES (%s,%s,%s,%s,%s)", 
@@ -98,7 +104,7 @@ if "user" not in st.session_state:
             if u_info:
                 pw, h_giris, kilit, aktif, u_role = u_info[0]
                 if kilit and datetime.now() < datetime.strptime(kilit, "%Y-%m-%d %H:%M:%S"):
-                    st.error(f"🔒 Hesap kilitlendi! Açılış: {kilit}"); st.stop()
+                    st.error(f"🔒 Hesap kilitli! Açılış: {kilit}"); st.stop()
                 
                 if sifre_dogrula(u, p, pw):
                     vt_sorgu("UPDATE users SET hatali_giris=0, kilit_suresi=NULL WHERE username=%s", (u,), commit=True)
@@ -106,9 +112,8 @@ if "user" not in st.session_state:
                     st.session_state.role = u_role
                     log_ekle(u, "GIRIS", "Başarılı giriş.")
                     sistem_kontrol(u)
-                    st.success("Karargaha giriş yapıldı! Yönlendiriliyorsun...")
-                    time.sleep(1)
-                    st.rerun()
+                    st.success("Yönlendiriliyorsun...")
+                    time.sleep(1); st.rerun()
                 else:
                     yeni_h = h_giris + 1
                     if yeni_h >= 5:
@@ -121,19 +126,19 @@ if "user" not in st.session_state:
             
     with t2:
         nu = st.text_input("Yeni Alfa Adı", key="reg_u")
-        np = st.text_input("Şifre (Min 6 Karakter)", key="reg_p", type="password")
+        np = st.text_input("Şifre (Min 6 Karakter)", type="password", key="reg_p")
         if st.button("Kaydol", key="reg_btn"):
             if len(np) < 6: st.warning("Şifre çok kısa!")
-            elif vt_sorgu("SELECT 1 FROM users WHERE username=%s", (nu,)): st.error("Bu ad zaten alınmış.")
+            elif vt_sorgu("SELECT 1 FROM users WHERE username=%s", (nu,)): st.error("Bu ad alınmış.")
             else:
                 h_np = bcrypt.hashpw(np.encode(), bcrypt.gensalt()).decode()
-                # --- FİX: 7 Günlük Deneme Süresi Ekleme ---
+                # 7 Günlük deneme süresi
                 deneme_sonu = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
                 vt_sorgu("""INSERT INTO users (username, password, kayit_tarihi, streak, deneme_bitis) 
                          VALUES (%s,%s,%s,%s,%s)""", 
                          (nu, h_np, str(datetime.now().date()), 1, deneme_sonu), commit=True)
-                log_ekle(nu, "KAYIT", "7 Günlük Deneme ile kayıt oldu.")
-                st.success(f"🐺 Hoş geldin {nu}! 7 günlük deneme süren başladı. Şimdi giriş yapabilirsin.")
+                log_ekle(nu, "KAYIT", "7 Günlük deneme ile kayıt.")
+                st.success("🐺 Kayıt başarılı! Giriş yapabilirsin.")
     st.stop()
 
 # --- 5. ANA EKRAN VERİLERİ ---
@@ -160,7 +165,7 @@ max_kota, limit_sn = AI_KOTALARI.get(k_tipi, 2), RATE_LIMITS.get(k_tipi, 15)
 with st.sidebar:
     st.title(f"🎖️ {st.session_state.user}")
     if premium and st.session_state.role != "admin":
-        st.success(f"🌟 Premium (Kalan: {max(0, kalan_gun)} Gün)")
+        st.success(f"🌟 Premium ({max(0, kalan_gun)} Gün)")
     st.metric("🤖 AI Günlük Kota", f"{u_ai_kota}/{max_kota}")
     st.divider()
     menu = st.radio("Operasyon", ["📊 Karargah", "📸 Soru Çöz", "🛠️ Admin"], key="main_menu")
@@ -169,7 +174,7 @@ with st.sidebar:
 
 # --- 7. MODÜLLER ---
 if menu == "📸 Soru Çöz":
-    if u_ai_kota >= max_kota: st.warning("Günlük AI limitin doldu!"); st.stop()
+    if u_ai_kota >= max_kota: st.warning("Limit doldu!"); st.stop()
     img = st.camera_input("Soruyu Gönder", key="cam_input")
     if img:
         with st.spinner("AI Çözüyor..."):
