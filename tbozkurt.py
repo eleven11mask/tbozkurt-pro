@@ -3,11 +3,14 @@ import psycopg2
 from psycopg2 import extras, pool
 import google.generativeai as genai
 from datetime import datetime, timedelta
+import time, bcrypt, html, secrets, string, logging
 from PIL import Image
-import time, bcrypt, html
 
-# --- 1. ÇEKİRDEK YAPILANDIRMA ---
+# --- 1. SİSTEM ÇEKİRDEĞİ & LOGLAMA ---
 st.set_page_config(page_title="T-BOZKURT", layout="wide", page_icon="🐺")
+
+# Hataların sessizce yok olmaması için arka plan kayıt sistemi
+logging.basicConfig(level=logging.ERROR, format='%(asctime)s - %(message)s')
 
 @st.cache_resource
 def init_model():
@@ -18,31 +21,42 @@ MODEL = init_model()
 
 @st.cache_resource
 def init_db_pool():
-    return psycopg2.pool.SimpleConnectionPool(1, 15, st.secrets["DATABASE_URL"])
+    # 20 kullanıcıya kadar eş zamanlı bağlantı havuzu
+    return psycopg2.pool.SimpleConnectionPool(1, 20, st.secrets["DATABASE_URL"])
 
 db_p = init_db_pool()
 
 def vt(s, p=(), commit=False):
+    """
+    Zırhlı Veritabanı Motoru. 
+    Rowcount kontrollü (işlem başarısını teyit eder) ve Loglamalıdır.
+    """
     c = db_p.getconn()
     try:
         cur = c.cursor(cursor_factory=extras.DictCursor)
         cur.execute(s, p)
-        res = True if commit else cur.fetchall()
-        if commit: c.commit()
+        if commit:
+            affected = cur.rowcount
+            c.commit()
+            cur.close()
+            return affected > 0 # İşlem gerçekten bir satırı etkiledi mi?
+        res = cur.fetchall()
         cur.close()
         return res
     except Exception as e:
-        print(f"VT Hatası: {e}")
+        logging.error(f"VT KRİTİK HATA: {e}")
         return False if commit else []
     finally: db_p.putconn(c)
 
-def log_event(u, ev):
-    vt("INSERT INTO analytics (username, event) VALUES (%s, %s)", (u, ev), commit=True)
+def generate_lic_id():
+    """15 haneli, tahmin edilemez kripto lisans ID üretici"""
+    chars = string.ascii_uppercase + string.digits
+    return ''.join(secrets.choice(chars) for _ in range(15))
 
-# --- 2. KİMLİK DOĞRULAMA ---
+# --- 2. KİMLİK DOĞRULAMA (GİRİŞ/KAYIT) ---
 if "user" not in st.session_state:
     st.markdown("<h1 style='text-align: center;'>🐺 T-BOZKURT KARARGAHI</h1>", unsafe_allow_html=True)
-    mod = st.segmented_control("Harekât", ["Giriş Yap", "Kayıt Ol"], default="Giriş Yap")
+    mod = st.segmented_control("Erişim Hattı", ["Giriş Yap", "Kayıt Ol"], default="Giriş Yap")
     
     col1, col2, col3 = st.columns([1, 1.5, 1])
     with col2:
@@ -50,12 +64,13 @@ if "user" not in st.session_state:
             with st.form("l_form"):
                 u = st.text_input("Alfa Adı")
                 p = st.text_input("Şifre", type="password")
-                if st.form_submit_button("BAĞLAN", use_container_width=True):
+                if st.form_submit_button("SİSTEME GİR", use_container_width=True):
                     res = vt("SELECT password, role FROM users WHERE username=%s", (u,))
                     if res and bcrypt.checkpw(p.encode(), res[0][0].encode()):
                         st.session_state.user, st.session_state.role = u, res[0][1]
-                        log_event(u, "login"); st.rerun()
-                    else: st.error("Hatalı Kimlik!")
+                        vt("INSERT INTO analytics (username, event) VALUES (%s, 'login')", (u,), commit=True)
+                        st.rerun()
+                    else: st.error("Erişim Reddedildi!")
         else:
             with st.form("k_form"):
                 nu = st.text_input("Yeni Alfa Adı")
@@ -63,122 +78,181 @@ if "user" not in st.session_state:
                 if st.form_submit_button("KATIL", use_container_width=True):
                     if len(nu) >= 3 and not vt("SELECT 1 FROM users WHERE username=%s", (nu,)):
                         hp = bcrypt.hashpw(np.encode(), bcrypt.gensalt()).decode()
-                        dbitis = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
-                        vt("""INSERT INTO users (username, password, deneme_bitis, deneme_kullanildi, streak, xp, ai_sayaci, son_giris) 
-                           VALUES (%s, %s, %s, TRUE, 1, 0, 0, %s)""", (nu, hp, dbitis, str(datetime.now().date())), commit=True)
-                        log_event(nu, "register"); st.success("Hoş geldin nefer!")
-                    else: st.error("Geçersiz ad veya kullanımda.")
+                        dbitis = (datetime.now() + timedelta(days=7)).date()
+                        # Kayıt anında 7 günlük deneme tanımlanır
+                        vt("""INSERT INTO users (username, password, premium_expiry, shopify_order_id, streak, xp, ai_sayaci, son_giris) 
+                           VALUES (%s, %s, %s, NULL, 1, 0, 0, %s)""", (nu, hp, dbitis, str(datetime.now().date())), commit=True)
+                        st.success("🐺 Kayıt Başarılı! 7 Günlük Deneme Aktif.")
     st.stop()
 
-# --- 3. VERİ KONTROLÜ & RESET ---
+# --- 3. PREMİUM DURUMU & GÜNLÜK RESET ---
 res_u = vt("SELECT * FROM users WHERE username=%s", (st.session_state.user,))
 if not res_u: st.session_state.clear(); st.stop()
-
 u_data = res_u[0]
-today = str(datetime.now().date())
+today = datetime.now().date()
 
-if u_data['son_giris'] != today:
-    n_streak = u_data['streak'] + 1 if u_data['son_giris'] == str(datetime.now().date() - timedelta(days=1)) else 1
-    vt("UPDATE users SET ai_sayaci=0, son_giris=%s, streak=%s WHERE username=%s", (today, n_streak, st.session_state.user), commit=True)
+# Günlük AI Sayacı ve Streak Kontrolü
+if u_data['son_giris'] != str(today):
+    n_streak = u_data['streak'] + 1 if u_data['son_giris'] == str(today - timedelta(days=1)) else 1
+    vt("UPDATE users SET ai_sayaci=0, son_giris=%s, streak=%s WHERE username=%s", (str(today), n_streak, st.session_state.user), commit=True)
     st.rerun()
 
-try:
-    is_prem = st.session_state.role == 'admin' or (u_data['deneme_bitis'] and datetime.now().date() <= datetime.strptime(u_data['deneme_bitis'], "%Y-%m-%d").date())
-except: is_prem = False
-
+# Premium Yetki Kontrolü (Server-side)
+is_prem = (st.session_state.role == 'admin') or (u_data['premium_expiry'] and today <= u_data['premium_expiry'])
 k_tipi = st.session_state.role if st.session_state.role == 'admin' else ('premium' if is_prem else 'free')
 u_seviye = (u_data['xp'] // 100) + 1
 
-# --- 4. SIDEBAR ---
+# --- 4. SIDEBAR (KOMUTA MERKEZİ) ---
 with st.sidebar:
     st.title(f"🎖️ {st.session_state.user}")
     c1, c2 = st.columns(2)
     c1.metric("🔥 Seri", f"{u_data['streak']} Gün")
     c2.metric("🏆 Seviye", u_seviye)
-    st.progress(min((u_data['xp'] % 100) / 100, 1.0), text=f"İlerleme: {u_data['xp'] % 100}/100")
+    st.progress(min((u_data['xp'] % 100) / 100, 1.0))
     
-    if u_data['streak'] >= 3: st.success("🎖️ İstikrarlı Kurt")
-    if k_tipi != 'free': st.success("⭐ PREMİUM: Hızlı Hat")
-    else: st.info("💡 Premium ile limitleri kaldır!")
+    if is_prem: st.success(f"⭐ PREMİUM ({u_data['premium_expiry']})")
+    else: st.warning("⚠️ ÜCRETSİZ HESAP")
 
-    menus = ["🏰 Karargah", "📸 Soru Çöz"]
-    if st.session_state.role == "admin": menus.append("🛠️ Admin")
-    menu = st.radio("OPERASYON", menus)
+    menu = st.radio("OPERASYON", ["🏰 Karargah", "📸 Soru Çöz", "🛡️ Kurt Kampı", "💳 Lisans Aktif Et", "🛠️ Admin"])
     if st.button("🚪 Ayrıl"): st.session_state.clear(); st.rerun()
 
-# --- 5. MODÜLLER ---
+# --- 5. OPERASYONEL MODÜLLER ---
+
+# --- A. KARARGAH (EĞİTİM & MÜFREDAT) ---
 if menu == "🏰 Karargah":
-    st.header("🛡️ Harekat Merkezi")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        if st.button("🟢 BETA (1-5)", use_container_width=True): st.session_state.oda = "BETA"
+    st.header("📚 Eğitim Üssü")
+    res_m = vt("SELECT DISTINCT sinif FROM mufredat")
+    s_list = [r[0] for r in res_m] if res_m else ["9","10","11","12"]
+    
+    col1, col2 = st.columns(2)
+    with col1: s_sinif = st.selectbox("Sınıf", s_list)
     with col2:
-        if u_seviye > 5 or st.session_state.role == 'admin':
-            if st.button("🔴 ALFA (5+)", use_container_width=True): st.session_state.oda = "ALFA"
-        else: st.info("🔒 Seviye 5+")
-    with col3:
-        if k_tipi != 'free':
-            if st.button("💎 ÖZEL SUNUCU", use_container_width=True): st.session_state.oda = "PREMIUM"
-        else: st.warning("🔒 Lisans Gerekli")
-
-    if "oda" in st.session_state:
-        st.markdown(f"**📡 {st.session_state.oda} Hattı**")
-        r_chat = vt("SELECT son_chat_zamani FROM users WHERE username=%s", (st.session_state.user,))
-        check_chat = r_chat[0][0] if r_chat else None
-        
-        with st.container(height=250):
-            msgs = vt("SELECT username, message, tarih FROM chat_rooms WHERE room=%s ORDER BY id DESC LIMIT 15", (st.session_state.oda,))
-            for m in reversed(msgs):
-                st.write(f"**{m[0]}:** {html.escape(m[1])} <small style='color:gray;'>{m[2]}</small>", unsafe_allow_html=True)
-        
-        with st.form("chat_form", clear_on_submit=True):
-            msg = st.text_input("Mesaj...")
-            if st.form_submit_button("GÖNDER"):
-                if check_chat and (datetime.now() - check_chat).total_seconds() < 3:
-                    st.toast("⚠️ Bekleyiniz (3sn)")
-                elif msg.strip():
-                    vt("INSERT INTO chat_rooms (username, message, room, tarih) VALUES (%s,%s,%s,%s)", 
-                       (st.session_state.user, msg, st.session_state.oda, datetime.now().strftime("%H:%M")), commit=True)
-                    vt("UPDATE users SET son_chat_zamani=%s, xp=xp+1 WHERE username=%s", (datetime.now(), st.session_state.user), commit=True)
-                    st.toast("💬 +1 XP"); time.sleep(0.3); st.rerun()
-
-    st.divider()
-    st.subheader("📚 Eğitim Cephaneliği")
-    d_list = vt("SELECT DISTINCT ders FROM mufredat")
-    sec_d = st.selectbox("Ders", [d[0] for d in d_list] if d_list else ["Yok"])
-    k_list = vt("SELECT id, konu FROM mufredat WHERE ders=%s", (sec_d,))
-    k_dict = {k['konu']: k['id'] for k in k_list}
-    sec_k = st.selectbox("Konu", list(k_dict.keys()) if k_dict else ["Yok"])
+        res_d = vt("SELECT DISTINCT ders FROM mufredat WHERE sinif=%s", (s_sinif,))
+        d_list = [r[0] for r in res_d] if res_d else ["Ders Yok"]
+        s_ders = st.selectbox("Ders", d_list)
+    
+    res_k = vt("SELECT id, konu FROM mufredat WHERE sinif=%s AND ders=%s", (s_sinif, s_ders))
+    k_dict = {k['konu']: k['id'] for k in res_k}
+    s_konu = st.selectbox("Konu", list(k_dict.keys()) if k_dict else ["Yok"])
     
     if st.button("Eğitimi Başlat") and k_dict:
-        # 1️⃣ Production Korumalı Veri Çekme
-        r_detay = vt("SELECT icerik, podcast_url FROM mufredat WHERE id=%s", (k_dict[sec_k],))
+        r_detay = vt("SELECT icerik, podcast_url FROM mufredat WHERE id=%s", (k_dict[s_konu],))
         if r_detay:
             detay = r_detay[0]
-            t1, t2 = st.tabs(["📖 Notlar", "🎧 Podcast"])
+            st.divider()
+            t1, t2 = st.tabs(["📖 Ders Notları", "🎧 Podcast"])
             with t1: st.markdown(detay['icerik'])
             with t2:
                 if detay['podcast_url']: st.audio(detay['podcast_url'])
-                else: st.info("Podcast yakında.")
-        else: st.error("Hata: İçerik Karargahta bulunamadı!")
+                else: st.info("Bu konu için podcast mühimmatı yolda.")
 
+# --- B. LİSANS AKTİF ET (SHOPIFY ENTEGRASYON) ---
+elif menu == "💳 Lisans Aktif Et":
+    st.header("🎖️ Premium Aktivasyon")
+    
+    allow_req = False
+    if u_data['shopify_order_id'] and is_prem:
+        st.info(f"Mevcut Lisansınız Aktif: {u_data['shopify_order_id']}.")
+    elif u_data['shopify_order_id'] and not is_prem:
+        st.warning("Eski lisans süreniz dolmuş. Yeni bir sipariş numarası girebilirsiniz.")
+        allow_req = True
+    else:
+        allow_req = True
+
+    if allow_req:
+        with st.form("lic_f"):
+            oid = st.text_input("Shopify Sipariş No (Örn: #1024)")
+            if st.form_submit_button("LİSANS TALEBİ GÖNDER"):
+                if oid.strip():
+                    if vt("UPDATE users SET shopify_order_id=%s WHERE username=%s", (oid, st.session_state.user), commit=True):
+                        vt("INSERT INTO analytics (username, event) VALUES (%s, %s)", (st.session_state.user, f"lic_req: {oid}"), commit=True)
+                        st.success("Talebiniz Admin onayına iletildi."); time.sleep(1); st.rerun()
+                else: st.error("Sipariş No boş bırakılamaz!")
+
+# --- C. KURT KAMPI (YETKİ KONTROLLÜ CHAT) ---
+elif menu == "🛡️ Kurt Kampı":
+    st.header("⚔️ Kurt Kampı Sohbet")
+    oda = st.segmented_control("Hat Seç", ["BETA", "ALFA", "PREMIUM"], default="BETA")
+    
+    # Oda Yetki Kontrolleri
+    if oda == "ALFA" and u_seviye < 5 and st.session_state.role != "admin":
+        st.error("🔴 ALFA Hattı için en az 5. Seviye olmalısın!"); st.stop()
+    if oda == "PREMIUM" and not is_prem:
+        st.error("💎 ÖZEL HAT sadece Premium neferler içindir!"); st.stop()
+
+    with st.container(height=300):
+        msgs = vt("SELECT username, message, tarih FROM chat_rooms WHERE room=%s ORDER BY id DESC LIMIT 20", (oda,))
+        for m in reversed(msgs):
+            st.write(f"**{m[0]}:** {html.escape(m[1])} <small style='color:gray;'>{m[2]}</small>", unsafe_allow_html=True)
+    
+    with st.form("c_f", clear_on_submit=True):
+        m_txt = st.text_input("Mesaj...")
+        if st.form_submit_button("GÖNDER"):
+            if m_txt.strip():
+                vt("INSERT INTO chat_rooms (username, message, room, tarih) VALUES (%s,%s,%s,%s)", 
+                   (st.session_state.user, m_txt, oda, datetime.now().strftime("%H:%M")), commit=True)
+                vt("UPDATE users SET xp=xp+1 WHERE username=%s", (st.session_state.user,), commit=True)
+                st.rerun()
+
+# --- D. SORU ÇÖZ (ZIRHLI AI MOTORU) ---
 elif menu == "📸 Soru Çöz":
     r_ai = vt("SELECT ai_sayaci FROM users WHERE username=%s", (st.session_state.user,))
     curr_ai = r_ai[0][0] if r_ai else 999
     max_h = 3 if k_tipi == 'free' else (999 if k_tipi == 'admin' else 50)
     
-    if curr_ai >= max_h: st.error(f"❌ Limit Doldu ({max_h}/{max_h})"); st.stop()
+    if curr_ai >= max_h: st.error("Günlük Mühimmat Bitti!"); st.stop()
     
     img = st.camera_input("Soru Çek")
     if img:
-        with st.spinner("AI Analiz Ediyor..."):
-            res = MODEL.generate_content(["Sen bir YKS öğretmenisin. Soruyu Türkçe ve adım adım çöz.", Image.open(img)])
-            if res:
-                st.markdown(res.text)
-                vt("UPDATE users SET ai_sayaci=ai_sayaci+1, xp=xp+10 WHERE username=%s", (st.session_state.user,), commit=True)
-                log_event(st.session_state.user, "ai_solve")
-                st.toast("🎯 +10 XP!"); time.sleep(1); st.rerun()
+        # DoS Koruması: Max 10MB
+        if img.size > 10 * 1024 * 1024:
+            st.error("Görsel çok büyük! (Maksimum 10MB)"); st.stop()
 
+        with st.spinner("AI Karargahtan Bilgi Çekiyor..."):
+            try:
+                res = MODEL.generate_content(["Sen bir YKS öğretmenisin. Bu soruyu Türkçe, adım adım ve net şekilde çöz.", Image.open(img)])
+                if res and hasattr(res, "text") and res.text:
+                    st.markdown(res.text)
+                    # Sadece başarılı çözümde kota düşer ve XP artar
+                    vt("UPDATE users SET ai_sayaci=ai_sayaci+1, xp=xp+10 WHERE username=%s", (st.session_state.user,), commit=True)
+                    st.toast("🎯 +10 XP Kazanıldı!"); time.sleep(1); st.rerun()
+                else: st.error("AI şu an yanıt veremiyor.")
+            except Exception as e:
+                logging.error(f"AI API HATASI: {e}")
+                st.error("AI servisi şu an meşgul. Lütfen 1 dakika sonra tekrar deneyin.")
+
+# --- E. ADMIN PANELI (STRATEJİK YÖNETİM) ---
 elif menu == "🛠️ Admin":
-    st.title("🔑 Analiz")
-    st.table(vt("SELECT username, event, tarih FROM analytics ORDER BY id DESC LIMIT 15"))
+    if st.session_state.role != "admin": st.error("Yetkisiz Erişim!"); st.stop()
+    t1, t2, t3, t4 = st.tabs(["🎖️ Lisans Onay", "🔑 ID Üret", "📦 Müfredat Girişi", "📊 Analiz"])
+    
+    with t1:
+        st.subheader("Kullanıcı Yetkilendirme")
+        with st.form("p_f"):
+            target = st.text_input("Hedef Kullanıcı Adı")
+            days = st.number_input("Verilecek Gün Sayısı", min_value=1, value=30)
+            if st.form_submit_button("PREMIUM YETKİSİ VER / ONAYLA"):
+                if vt("SELECT 1 FROM users WHERE username=%s", (target,)):
+                    exp = datetime.now().date() + timedelta(days=days)
+                    if vt("UPDATE users SET premium_expiry=%s, shopify_order_id=NULL WHERE username=%s", (exp, target), commit=True):
+                        st.success(f"{target} kullanıcısı {exp} tarihine kadar Premium yapıldı.")
+                else: st.error("Böyle bir nefer bulunamadı!")
+
+    with t2:
+        st.subheader("Kripto Lisans ID Üretici")
+        if st.button("15 HANELİ GÜVENLİ ID ÜRET"):
+            st.code(generate_lic_id(), language="text")
+
+    with t3:
+        st.subheader("Manuel Müfredat Girişi")
+        with st.form("m_f"):
+            s, d, k = st.text_input("Sınıf (9-12)"), st.text_input("Ders Adı"), st.text_input("Konu Adı")
+            i = st.text_area("Konu Anlatımı (Markdown Destekli)")
+            p = st.text_input("Podcast URL")
+            if st.form_submit_button("KARARGAHA KAYDET"):
+                if vt("INSERT INTO mufredat (sinif, ders, konu, icerik, podcast_url) VALUES (%s,%s,%s,%s,%s)", (s,d,k,i,p), commit=True):
+                    st.success("Mühimmat sisteme başarıyla yüklendi!")
+
+    with t4:
+        st.subheader("Sistem Hareket Logları")
+        st.table(vt("SELECT id, username, event, tarih FROM analytics ORDER BY id DESC LIMIT 20"))
