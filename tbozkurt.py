@@ -65,7 +65,7 @@ if "user" not in st.session_state:
         else:
             with st.form("k_form"):
                 nu = st.text_input("Yeni Alfa Adı")
-                np = st.text_input("Şifre", type="password")
+                np = st.text_input("Şifre Belirle", type="password")
                 if st.form_submit_button("KATIL", use_container_width=True):
                     if len(nu) >= 3 and not vt("SELECT 1 FROM users WHERE username=%s", (nu,)):
                         hp = bcrypt.hashpw(np.encode(), bcrypt.gensalt()).decode()
@@ -75,18 +75,20 @@ if "user" not in st.session_state:
                         st.success("🐺 Kayıt Tamam! 7 Günlük Deneme Başladı.")
     st.stop()
 
-# --- 3. VERİ ÇEKME VE HATA KORUMASI ---
+# --- 3. VERİ ÇEKME VE ZIRHLI KONTROL ---
 res_u = vt("SELECT * FROM users WHERE username=%s", (st.session_state.user,))
 if not res_u: st.session_state.clear(); st.stop()
 u_data = res_u[0]
 today = datetime.now().date()
 
-# 🛡️ KeyError Koruması: Sütun yoksa None döner, uygulama çökmez
+# 🛡️ KeyError Koruması (SQL'deki yeni sütunlarla tam uyumlu)
 p_exp = u_data.get('premium_expiry')
 u_xp = u_data.get('xp', 0)
 u_ai_count = u_data.get('ai_sayaci', 0)
 u_streak = u_data.get('streak', 1)
+s_oid = u_data.get('shopify_order_id')
 
+# Günlük Reset Mantığı
 if u_data.get('son_giris') != str(today):
     n_streak = u_streak + 1 if u_data.get('son_giris') == str(today - timedelta(days=1)) else 1
     vt("UPDATE users SET ai_sayaci=0, son_giris=%s, streak=%s WHERE username=%s", (str(today), n_streak, st.session_state.user), commit=True)
@@ -109,7 +111,6 @@ with st.sidebar:
 
 if menu == "🏰 Karargah":
     st.header("📚 Eğitim Üssü")
-    # 
     res_m = vt("SELECT DISTINCT sinif FROM mufredat")
     s_list = [r[0] for r in res_m] if res_m else ["9","10","11","12"]
     s_sinif = st.selectbox("Sınıf", s_list)
@@ -134,15 +135,15 @@ elif menu == "📸 Soru Çöz":
     if u_ai_count >= max_h: st.error("Mühimmat Bitti!"); st.stop()
     img = st.camera_input("Soru Çek")
     if img:
-        if img.size > 10 * 1024 * 1024: st.error("Çok büyük!"); st.stop()
+        if img.size > 10 * 1024 * 1024: st.error("Dosya çok büyük!"); st.stop()
         with st.spinner("AI Çözüyor..."):
             try:
-                res = MODEL.generate_content(["YKS öğretmenisin. Türkçe çöz.", Image.open(img)])
+                res = MODEL.generate_content(["YKS öğretmenisin. Bu soruyu adım adım Türkçe çöz.", Image.open(img)])
                 if res and hasattr(res, 'text'):
                     st.markdown(res.text)
                     vt("UPDATE users SET ai_sayaci=ai_sayaci+1, xp=xp+10 WHERE username=%s", (st.session_state.user,), commit=True)
                     st.toast("🎯 +10 XP!"); time.sleep(1); st.rerun()
-            except Exception as e: st.error("AI Meşgul.")
+            except Exception as e: st.error("AI Meşgul, sonra tekrar dene.")
 
 elif menu == "🛡️ Kurt Kampı":
     st.header("⚔️ Sohbet Odaları")
@@ -165,27 +166,30 @@ elif menu == "🛡️ Kurt Kampı":
 
 elif menu == "💳 Lisans Aktif Et":
     st.header("🎖️ Lisans Aktivasyonu")
-    with st.form("lic_f"):
-        oid = st.text_input("Shopify Sipariş No")
-        if st.form_submit_button("GÖNDER") and oid.strip():
-            vt("UPDATE users SET shopify_order_id=%s WHERE username=%s", (oid, st.session_state.user), commit=True)
-            st.success("Talep iletildi.")
+    if s_oid and is_prem: st.info(f"Aktif Lisans: {s_oid}")
+    else:
+        with st.form("lic_f"):
+            oid = st.text_input("Shopify Sipariş No")
+            if st.form_submit_button("GÖNDER") and oid.strip():
+                if vt("UPDATE users SET shopify_order_id=%s WHERE username=%s", (oid, st.session_state.user), commit=True):
+                    st.success("Talep alındı.")
 
 elif menu == "🛠️ Admin":
-    if st.session_state.role != "admin": st.error("Yetkisiz!"); st.stop()
+    if st.session_state.role != 'admin': st.error("Yetkisiz!"); st.stop()
     t1, t2, t3 = st.tabs(["🎖️ Onay", "📦 Müfredat", "📊 Analiz"])
     with t1:
         target = st.text_input("Kullanıcı")
         days = st.number_input("Gün", min_value=1, value=30)
-        if st.button("Premium Yap"):
+        if st.button("Onayla"):
             exp = datetime.now().date() + timedelta(days=days)
             if vt("UPDATE users SET premium_expiry=%s, shopify_order_id=NULL WHERE username=%s", (exp, target), commit=True):
-                st.success(f"{target} güncellendi.")
+                st.success(f"{target} artık Premium!")
     with t2:
         with st.form("m_i"):
             s, d, k = st.text_input("Sınıf"), st.text_input("Ders"), st.text_input("Konu")
             i, p = st.text_area("İçerik"), st.text_input("Podcast URL")
             if st.form_submit_button("KAYDET"):
                 vt("INSERT INTO mufredat (sinif, ders, konu, icerik, podcast_url) VALUES (%s,%s,%s,%s,%s)", (s,d,k,i,p), commit=True)
+                st.success("Eklendi.")
     with t3:
         st.table(vt("SELECT * FROM analytics ORDER BY id DESC LIMIT 10"))
