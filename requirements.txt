@@ -1,7 +1,10 @@
-gtts
-Pillow
-pandas
+streamlit
 psycopg2-binary
 google-generativeai
+bcrypt
+pillow
+gTTS
+pandas
+requests
 
 
