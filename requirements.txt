@@ -1,7 +1,7 @@
-streamlit
-psycopg2-binary
-google-generativeai
-bcrypt
+gtts
 Pillow
 pandas
+psycopg2-binary
+google-generativeai
+
 
