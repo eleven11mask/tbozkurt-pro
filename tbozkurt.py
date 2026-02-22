@@ -2,185 +2,174 @@ import streamlit as st
 import psycopg2 
 from psycopg2 import extras, pool
 import google.generativeai as genai
-from datetime import datetime, timedelta
-import time, bcrypt, html, secrets, string, logging
+from datetime import datetime, timedelta, date
+import time, bcrypt, secrets, json, logging, requests, io
 from PIL import Image
+from gtts import gTTS
+import pandas as pd
 
-# --- 1. SİSTEM ÇEKİRDEĞİ ---
+# --- AYARLAR VE BAĞLANTILAR ---
 st.set_page_config(page_title="T-BOZKURT", layout="wide", page_icon="🐺")
-logging.basicConfig(level=logging.ERROR, format='%(asctime)s - %(message)s')
 
 @st.cache_resource
-def init_model():
-    genai.configure(api_key=st.secrets["GEMINI_KEY"])
-    return genai.GenerativeModel("gemini-1.5-flash-latest")
+def vt_havuzu_baslat():
+    return psycopg2.pool.SimpleConnectionPool(1, 15, st.secrets["DATABASE_URL"])
 
-MODEL = init_model()
+HAVUZ = vt_havuzu_baslat()
 
-@st.cache_resource
-def init_db_pool():
-    return psycopg2.pool.SimpleConnectionPool(1, 20, st.secrets["DATABASE_URL"])
-
-db_p = init_db_pool()
-
-def vt(s, p=(), commit=False):
-    c = db_p.getconn()
+def vt(sorgu, parametre=(), kaydet=False):
+    baglanti = None
     try:
-        cur = c.cursor(cursor_factory=extras.DictCursor)
-        cur.execute(s, p)
-        if commit:
-            affected = cur.rowcount
-            c.commit()
-            cur.close()
-            return affected > 0
-        res = cur.fetchall()
-        cur.close()
-        return res
+        baglanti = HAVUZ.getconn()
+        imlec = baglanti.cursor(cursor_factory=extras.DictCursor)
+        imlec.execute(sorgu, parametre)
+        sonuc = imlec.fetchall() if imlec.description else None
+        if kaydet: baglanti.commit()
+        return sonuc if sonuc is not None else (True if kaydet else [])
     except Exception as e:
-        logging.error(f"VT HATASI: {e}")
-        return False if commit else []
-    finally: db_p.putconn(c)
+        if baglanti and kaydet: baglanti.rollback()
+        return False
+    finally:
+        if baglanti: HAVUZ.putconn(baglanti)
 
-def log_event(u, event):
-    vt("INSERT INTO analytics (username, event) VALUES (%s, %s)", (u, event), commit=True)
+@st.cache_resource
+def ai_baslat():
+    genai.configure(api_key=st.secrets["GEMINI_KEY"])
+    return genai.GenerativeModel("gemini-1.5-flash-latest", generation_config={"response_mime_type": "application/json"})
 
-# --- 2. GÜVENLİK VE LİSANS ARAÇLARI ---
-def generate_shopier_id():
-    chars = string.ascii_letters + string.digits + "!?"
-    new_code = ''.join(secrets.choice(chars) for _ in range(17))
-    # Üretilen kodu veritabanına "kullanılmamış" olarak kaydet
-    vt("INSERT INTO license_codes (code, used) VALUES (%s, False)", (new_code,), commit=True)
-    return new_id
+MODEL = ai_baslat()
 
-# --- 3. KİMLİK DOĞRULAMA (BRUTE-FORCE KORUMALI) ---
-if "user" not in st.session_state:
-    st.markdown("<h1 style='text-align: center;'>🐺 T-BOZKURT KARARGAHI</h1>", unsafe_allow_html=True)
-    mod = st.segmented_control("Erişim", ["Giriş Yap", "Kayıt Ol"], default="Giriş Yap")
-    
-    col1, col2, col3 = st.columns([1, 1.5, 1])
-    with col2:
-        if mod == "Giriş Yap":
-            with st.form("l_form"):
-                u = st.text_input("Alfa Adı")
-                p = st.text_input("Şifre", type="password")
-                if st.form_submit_button("SİSTEME GİR", use_container_width=True):
-                    # Brute-Force Kontrolü (Son 10 dk'da 5 hatalı giriş)
-                    fails = vt("SELECT count(*) FROM analytics WHERE username=%s AND event='login_fail' AND tarih > NOW() - INTERVAL '10 minutes'", (u,))
-                    if fails and fails[0][0] >= 5:
-                        st.error("Çok fazla hatalı deneme! 10 dakika bekleyin.")
-                    else:
-                        res = vt("SELECT password, role FROM users WHERE username=%s", (u,))
-                        if res and bcrypt.checkpw(p.encode(), res[0][0].encode()):
-                            if res[0][1] == 'admin':
-                                st.session_state.temp_user, st.session_state.temp_role = u, 'admin'
-                                st.session_state.secure_check = True
-                                st.rerun()
-                            else:
-                                st.session_state.user, st.session_state.role = u, res[0][1]
-                                log_event(u, "login")
-                                st.rerun()
-                        else:
-                            log_event(u, "login_fail")
-                            st.error("Kullanıcı adı veya şifre hatalı!")
-        else:
-            with st.form("k_form"):
-                nu = st.text_input("Yeni Alfa Adı")
-                np = st.text_input("Şifre Belirle", type="password")
-                if st.form_submit_button("KATIL", use_container_width=True):
-                    if len(nu) >= 3 and not vt("SELECT 1 FROM users WHERE username=%s", (nu,)):
-                        hp = bcrypt.hashpw(np.encode(), bcrypt.gensalt()).decode()
-                        vt("INSERT INTO users (username, password, role, streak, xp, ai_sayaci, son_giris) VALUES (%s,%s,'user', 1, 0, 0, %s)", 
-                           (nu, hp, str(datetime.now().date())), commit=True)
-                        log_event(nu, "register")
-                        st.success("🐺 Kayıt Başarılı!")
+# --- YARDIMCI FONKSİYONLAR ---
+def seslendir(metin):
+    try:
+        tts = gTTS(text=metin, lang='tr')
+        fp = io.BytesIO()
+        tts.write_to_fp(fp)
+        return fp
+    except: return None
 
-    if st.session_state.get("secure_check"):
-        st.divider()
-        q_ans = st.text_input("Girilmek istenen yer neresidir?", type="password")
-        if st.button("KİMLİK DOĞRULA"):
-            # Güvenlik sorusunu basit bir hash ile kontrol edebiliriz (Opsiyonel: DB'den çekilebilir)
-            if q_ans.lower().strip() == "yeraltı karargahı":
-                st.session_state.user, st.session_state.role = st.session_state.temp_user, st.session_state.temp_role
-                del st.session_state.secure_check
-                log_event(st.session_state.user, "admin_login")
+def maliyet_kaydet(kullanici, tokens):
+    gider = (tokens / 1000000) * 0.075
+    vt("INSERT INTO cost_logs (username, tokens, cost) VALUES (%s, %s, %s)", (kullanici, tokens, gider), kaydet=True)
+
+# --- 1. OTURUM VE GİRİŞ SİSTEMİ ---
+if "kullanici" not in st.session_state:
+    st.title("🐺 T-BOZKURT KARARGAHI")
+    sekme1, sekme2 = st.tabs(["Giriş", "Kayıt"])
+    with sekme1:
+        u = st.text_input("Kullanıcı Adı").lower().strip()
+        p = st.text_input("Şifre", type="password")
+        if st.button("Giriş Yap"):
+            res = vt("SELECT password, role FROM users WHERE username=%s", (u,))
+            if res and bcrypt.checkpw(p.encode(), res[0][0].encode()):
+                st.session_state.kullanici, st.session_state.rol = u, res[0][1]
                 st.rerun()
-            else: 
-                log_event(st.session_state.temp_user, "secure_fail")
-                st.error("Erişim Reddedildi!")
+            else: st.error("Hatalı bilgiler!")
     st.stop()
 
-# --- 4. VERİ ÇEKME & STREAK ---
-u_data = vt("SELECT * FROM users WHERE username=%s", (st.session_state.user,))[0]
-today = datetime.now().date()
-u_xp, u_ai_count, u_streak = u_data.get('xp', 0), u_data.get('ai_sayaci', 0), u_data.get('streak', 1)
-
-if u_data.get('son_giris') != str(today):
-    n_streak = u_streak + 1 if u_data.get('son_giris') == str(today - timedelta(days=1)) else 1
-    vt("UPDATE users SET ai_sayaci=0, son_giris=%s, streak=%s WHERE username=%s", (str(today), n_streak, st.session_state.user), commit=True)
+# Veri Çekme ve Günlük Reset
+veri = vt("SELECT * FROM users WHERE username=%s", (st.session_state.kullanici,))[0]
+if veri['son_giris'] != date.today():
+    yeni_seri = (veri['streak'] + 1) if veri['son_giris'] == date.today() - timedelta(days=1) else 1
+    vt("UPDATE users SET ai_sayaci=0, son_giris=%s, streak=%s WHERE username=%s", (date.today(), yeni_seri, st.session_state.kullanici), kaydet=True)
     st.rerun()
 
-is_prem = (st.session_state.role == 'admin') or (u_data.get('premium_expiry') and today <= u_data.get('premium_expiry'))
+# --- 2. MENÜ VE SIDEBAR ---
+menu = st.sidebar.radio("MENÜ", ["📊 Çalışma Masası", "📸 Soru Çözdür", "🏆 Derece Yapanlar", "💎 Özel Üyelik", "🛠 Sistem Yönetimi"])
 
-# --- 5. MODÜLLER ---
+# --- 3. MODÜLLER ---
 
-# A. KARARGAH (EĞİTİM)
-if st.sidebar.radio("OPERASYON", ["Karargah", "Soru Çöz", "Kurt Kampı", "Lisans", "Admin"]) == "Karargah":
-    st.header("📚 Eğitim Üssü")
-    # Müfredat mantığı öncekiyle aynı, silinmedi.
-    res_m = vt("SELECT DISTINCT sinif FROM mufredat")
-    if res_m:
-        s_sinif = st.selectbox("Sınıf", [r[0] for r in res_m])
-        # ... (Diğer müfredat seçimleri ve içerik gösterimi)
+if menu == "📊 Çalışma Masası":
+    st.header(f"Selam {st.session_state.kullanici.upper()}! 🐺")
+    k1, k2, k3 = st.columns(3)
+    k1.metric("Seri (Gün)", veri['streak'])
+    k2.metric("Toplam Puan", veri['xp'])
+    limit = 300 if st.session_state.rol != 'user' else (5 + (veri['xp'] // 100))
+    k3.metric("Kalan Hakkın", f"{limit - veri['ai_sayaci']}")
 
-# B. SORU ÇÖZ (KOTA & LOGLAMA)
-elif "Soru Çöz" in st.sidebar.selection: # sidebar mantığına göre uyarlanmalı
-    max_h = 3 if not is_prem else 50
-    if u_ai_count < max_h:
-        img = st.camera_input("Soru Çek")
-        if img:
-            with st.spinner("Çözülüyor..."):
-                try:
-                    res = MODEL.generate_content(["YKS Çöz.", Image.open(img)])
-                    st.markdown(res.text)
-                    vt("UPDATE users SET ai_sayaci=ai_sayaci+1, xp=xp+10 WHERE username=%s", (st.session_state.user,), commit=True)
-                    log_event(st.session_state.user, "ai_usage")
-                except: st.error("Hata!")
-
-# C. KURT KAMPI (FLOOD KORUMASI)
-elif "Kurt Kampı" in st.sidebar.selection:
-    st.header("⚔️ Sohbet")
-    # Flood Kontrolü: Son 5 saniyede mesaj atmış mı?
-    last_msg = vt("SELECT tarih FROM chat_rooms WHERE username=%s ORDER BY id DESC LIMIT 1", (st.session_state.user,))
+elif menu == "📸 Soru Çözdür":
+    st.subheader("Soru Çözüm ve Konu Anlatımı")
+    sekme_f, sekme_m = st.tabs(["📸 Fotoğraf", "✍️ Metin"])
+    input_verisi = None
     
-    with st.form("c_f", clear_on_submit=True):
-        m_txt = st.text_input("Mesaj...")
-        if st.form_submit_button("Gönder"):
-            if m_txt.strip():
-                # Basit saniye kontrolü (tarih string olduğu için daha detaylısı TIMESTAMP ile yapılır)
-                vt("INSERT INTO chat_rooms (username, message, tarih) VALUES (%s,%s,%s)", 
-                   (st.session_state.user, m_txt, datetime.now().strftime("%H:%M:%S")), commit=True)
-                log_event(st.session_state.user, "chat_message")
-                st.rerun()
+    with sekme_f: 
+        f = st.camera_input("Soru Çek")
+        if f: input_verisi = Image.open(f)
+    with sekme_m: 
+        m = st.text_area("Soruyu buraya yaz...")
+        if st.button("Çözüm Al"): input_verisi = m
 
-# D. LİSANS (GERÇEK DOĞRULAMA)
-elif "Lisans" in st.sidebar.selection:
-    st.header("🎖️ Aktivasyon")
-    l_code = st.text_input("17 Haneli Kod")
-    if st.button("Kodu Kullan"):
-        # Kod gerçekten var mı ve kullanılmamış mı?
-        check = vt("SELECT 1 FROM license_codes WHERE code=%s AND used=False", (l_code,))
-        if check:
-            exp = today + timedelta(days=30)
-            vt("UPDATE users SET premium_expiry=%s WHERE username=%s", (exp, st.session_state.user), commit=True)
-            vt("UPDATE license_codes SET used=True, used_by=%s WHERE code=%s", (st.session_state.user, l_code), commit=True)
-            log_event(st.session_state.user, "premium_granted")
-            st.success("Premium Aktif Edildi!")
-        else: st.error("Geçersiz veya kullanılmış kod!")
+    if input_verisi:
+        with st.spinner("🐺 Bozkurt Hafızayı ve Yapay Zekayı Sorguluyor..."):
+            # 🟢 ADIM 1: OCR ve Konu Saptama
+            saptama_p = "Sorunun dersini ve konusunu saptayıp JSON döndür: {metin, ders, konu}"
+            sap_cevap = MODEL.generate_content([saptama_p, input_verisi])
+            sap_json = json.loads(sap_cevap.text)
+            
+            # 🟢 ADIM 2: Hibrit Hafıza Kontrolü
+            hafiza = vt("SELECT icerik, kurt_notu FROM topic_contents WHERE ders=%s AND konu=%s", (sap_json['ders'], sap_json['konu']))
+            
+            if hafiza:
+                final_cozum, final_not, kaynak = hafiza[0]['icerik'], hafiza[0]['kurt_notu'], "Hafıza"
+                vt("UPDATE users SET ai_sayaci=ai_sayaci+1, xp=xp+5 WHERE username=%s", (st.session_state.kullanici,), kaydet=True)
+            else:
+                # Atomik İşlem: Hak düş
+                hak_check = vt("UPDATE users SET ai_sayaci=ai_sayaci+1, xp=xp+10 WHERE username=%s RETURNING id", (st.session_state.kullanici,), kaydet=True)
+                if hak_check:
+                    try:
+                        ai_p = f"{sap_json['ders']} dersi {sap_json['konu']} konusu anlatımı JSON: {{cozum, kurt_notu}}"
+                        ai_cevap = MODEL.generate_content([ai_p, input_verisi])
+                        ai_json = json.loads(ai_cevap.text)
+                        final_cozum, final_not, kaynak = ai_json['cozum'], ai_json['kurt_notu'], "Yapay Zeka"
+                        
+                        # Hafızaya Kaydet
+                        vt("INSERT INTO topic_contents (ders, konu, icerik, kurt_notu) VALUES (%s,%s,%s,%s)", 
+                           (sap_json['ders'], sap_json['konu'], final_cozum, final_not), kaydet=True)
+                        maliyet_kaydet(st.session_state.kullanici, ai_cevap.usage_metadata.total_token_count)
+                    except:
+                        vt("UPDATE users SET ai_sayaci=ai_sayaci-1, xp=xp-10 WHERE username=%s", (st.session_state.kullanici,), kaydet=True)
+                        st.error("Çözüm sırasında hata oluştu!"); st.stop()
 
-# E. ADMIN (KOMUTA & LİSANS ÜRETİMİ)
-elif "Admin" in st.sidebar.selection:
-    if st.session_state.role == 'admin':
-        if st.button("YENİ LİSANS KODU ÜRET"):
-            code = generate_shopier_id()
-            st.code(code)
-            log_event(st.session_state.user, "license_created")
+            # 🟢 ADIM 3: Sonuç Gösterimi
+            st.success(f"📌 {sap_json['ders']} | {sap_json['konu']} ({kaynak})")
+            st.markdown(final_cozum)
+            st.info(f"🐺 Kurt Notu: {final_not}")
+            
+            c1, c2 = st.columns(2)
+            if c1.button("🔊 Çözümü Dinle"):
+                s = seslendir(final_cozum.replace("*","").replace("#",""))
+                if s: st.audio(s)
+            if c2.button("🐺 Kurt Notunu Dinle"):
+                s = seslendir(final_not)
+                if s: st.audio(s)
+
+elif menu == "🛠 Sistem Yönetimi":
+    if st.session_state.rol != 'admin': st.warning("Yetkiniz yok!"); st.stop()
+    
+    st.subheader("🛠 Admin Kontrol Paneli")
+    tab1, tab2, tab3 = st.tabs(["📊 Maliyet & Hata", "📝 Konu Düzenle", "💎 Lisans Üret"])
+    
+    with tab1:
+        maliyet = vt("SELECT SUM(cost) FROM cost_logs")[0][0] or 0
+        st.metric("Toplam Yapay Zeka Harcaması", f"${maliyet:.4f}")
+        hatalar = vt("SELECT * FROM alarm_kayitlari ORDER BY tarih DESC LIMIT 5")
+        st.write("Son Hata Kayıtları:", hatalar)
+        
+    with tab2:
+        st.write("Hafızadaki Konuları Güncelle")
+        konular = vt("SELECT id, ders, konu FROM topic_contents")
+        if konular:
+            sec = st.selectbox("Düzenlenecek Konu", [f"{k['id']} | {k['ders']} - {k['konu']}" for k in konular])
+            sec_id = sec.split(" | ")[0]
+            mevcut = vt("SELECT * FROM topic_contents WHERE id=%s", (sec_id,))[0]
+            n_icerik = st.text_area("İçerik", value=mevcut['icerik'], height=200)
+            n_not = st.text_input("Kurt Notu", value=mevcut['kurt_notu'])
+            if st.button("Güncelle"):
+                vt("UPDATE topic_contents SET icerik=%s, kurt_notu=%s WHERE id=%s", (n_icerik, n_not, sec_id), kaydet=True)
+                st.success("Hafıza güncellendi!")
+
+    with tab3:
+        if st.button("15 Haneli Lisans Üret"):
+            kod = f"TB-{secrets.token_urlsafe(11)[:15].upper()}"
+            vt("INSERT INTO license_codes (code) VALUES (%s)", (kod,), kaydet=True)
+            st.code(kod)
